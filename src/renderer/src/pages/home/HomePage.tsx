@@ -82,6 +82,13 @@ const HomePage: FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
 
+  // After rehydration or when assistants load, ensure we have an active assistant
+  useEffect(() => {
+    if (!activeAssistant && assistants.length > 0) {
+      _setActiveAssistant(assistants[0])
+    }
+  }, [activeAssistant, assistants])
+
   useEffect(() => {
     const canMinimize = topicPosition == 'left' ? !showAssistants : !showAssistants && !showTopics
     window.api.window.setMinimumSize(canMinimize ? SECOND_MIN_WINDOW_WIDTH : MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)

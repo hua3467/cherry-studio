@@ -19,13 +19,13 @@ const StyledButton = styled(Button)`
   }
 `
 
-const AddButton: FC<ButtonProps> = ({ ...props }) => {
+const AddButton: FC<ButtonProps> = ({ icon, ...props }) => {
   return (
     <StyledButton
       {...props}
       type="text"
       onClick={props.onClick}
-      icon={<PlusIcon size={16} style={{ flexShrink: 0 }} />}>
+      icon={icon ?? <PlusIcon size={16} style={{ flexShrink: 0 }} />}>
       {props.children}
     </StyledButton>
   )

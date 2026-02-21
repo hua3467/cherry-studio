@@ -38,14 +38,14 @@ import Tabs from './Tabs'
 const logger = loggerService.withContext('Chat')
 
 interface Props {
-  assistant: Assistant
+  assistant: Assistant | null | undefined
   activeTopic: Topic
   setActiveTopic: (topic: Topic) => void
   setActiveAssistant: (assistant: Assistant) => void
 }
 
 const Chat: FC<Props> = (props) => {
-  const { assistant, updateTopic } = useAssistant(props.assistant.id)
+  const { assistant, updateTopic } = useAssistant(props.assistant?.id ?? '')
   const { t } = useTranslation()
   const { topicPosition, messageStyle, messageNavigation } = useSettings()
   const { showTopics } = useShowTopics()
@@ -175,6 +175,10 @@ const Chat: FC<Props> = (props) => {
       </div>
     )
   }, [t])
+
+  if (!props.assistant) {
+    return null
+  }
 
   return (
     <Container id="chat" className={classNames([messageStyle, { 'multi-select-mode': isMultiSelectMode }])}>

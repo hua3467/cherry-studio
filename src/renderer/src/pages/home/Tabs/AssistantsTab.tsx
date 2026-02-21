@@ -1,18 +1,26 @@
+import AddAssistantOrAgentPopup from '@renderer/components/Popups/AddAssistantOrAgentPopup'
+import AgentModalPopup from '@renderer/components/Popups/agent/AgentModal'
+import PromptPopup from '@renderer/components/Popups/PromptPopup'
 import Scrollbar from '@renderer/components/Scrollbar'
 import { useAgents } from '@renderer/hooks/agents/useAgents'
 import { useApiServer } from '@renderer/hooks/useApiServer'
 import { useAssistants } from '@renderer/hooks/useAssistant'
 import { useAssistantPresets } from '@renderer/hooks/useAssistantPresets'
+import { useFolders } from '@renderer/hooks/useFolders'
 import { useRuntime } from '@renderer/hooks/useRuntime'
 import { useAssistantsTabSortType } from '@renderer/hooks/useStore'
 import { useTags } from '@renderer/hooks/useTags'
+import { useAppDispatch } from '@renderer/store'
+import { setActiveTopicOrSessionAction } from '@renderer/store/runtime'
 import type { Assistant, AssistantsSortType, Topic } from '@renderer/types'
+import { FolderPlus, SmilePlus } from 'lucide-react'
 import type { FC } from 'react'
 import { useCallback, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
-import UnifiedAddButton from './components/UnifiedAddButton'
+import { AssistantFolderTree } from './components/AssistantFolderTree'
+import { SidebarBottomBar, SidebarBottomBarIconButton } from './components/SidebarBottomBar'
 import { UnifiedList } from './components/UnifiedList'
 import { UnifiedTagGroups } from './components/UnifiedTagGroups'
 import { useActiveAgent } from './hooks/useActiveAgent'
@@ -21,7 +29,7 @@ import { useUnifiedItems } from './hooks/useUnifiedItems'
 import { useUnifiedSorting } from './hooks/useUnifiedSorting'
 
 interface AssistantsTabProps {
-  activeAssistant: Assistant
+  activeAssistant: Assistant | null | undefined
   setActiveAssistant: (assistant: Assistant) => void
   onCreateAssistant: () => void
   onCreateDefaultAssistant: () => void
@@ -30,7 +38,7 @@ interface AssistantsTabProps {
 const AssistantsTab: FC<AssistantsTabProps> = (props) => {
   const { activeAssistant, setActiveAssistant, onCreateAssistant, onCreateDefaultAssistant } = props
   const containerRef = useRef<HTMLDivElement>(null)
-  const { apiServerConfig } = useApiServer()
+  const { apiServerConfig, apiServerRunning, startApiServer } = useApiServer()
   const apiServerEnabled = apiServerConfig.enabled
   const { chat } = useRuntime()
   const { t } = useTranslation()
@@ -122,67 +130,157 @@ const AssistantsTab: FC<AssistantsTabProps> = (props) => {
     [setActiveAgentId, setActiveAssistant]
   )
 
+  const dispatch = useAppDispatch()
+  const { addAssistantFolder } = useFolders()
+
+  const handleAddAssistantClick = useCallback(() => {
+    AddAssistantOrAgentPopup.show({
+      onSelect: (type) => {
+        if (type === 'assistant') {
+          onCreateAssistant()
+        }
+        if (type === 'agent') {
+          if (!apiServerRunning) startApiServer()
+          AgentModalPopup.show({
+            afterSubmit: (a) => {
+              setActiveAssistant({
+                id: 'fake',
+                name: '',
+                prompt: '',
+                topics: [
+                  {
+                    id: 'fake',
+                    assistantId: 'fake',
+                    name: 'fake',
+                    createdAt: '',
+                    updatedAt: '',
+                    messages: []
+                  } as unknown as Topic
+                ],
+                type: 'chat'
+              })
+              setActiveAgentId(a.id)
+              dispatch(setActiveTopicOrSessionAction('session'))
+            }
+          })
+        }
+      }
+    })
+  }, [onCreateAssistant, apiServerRunning, startApiServer, setActiveAssistant, setActiveAgentId, dispatch])
+
+  const handleAddFolderClick = useCallback(async () => {
+    if (assistantsTabSortType !== 'folders') {
+      setAssistantsTabSortType('folders')
+    }
+    const name = await PromptPopup.show({
+      title: t('folders.add_assistant_folder'),
+      message: '',
+      defaultValue: t('folders.new_folder_name')
+    })
+    if (name?.trim()) addAssistantFolder(name.trim())
+  }, [assistantsTabSortType, setAssistantsTabSortType, addAssistantFolder, t])
+
+  if (!activeAssistant) {
+    return (
+      <Container className="assistants-tab" ref={containerRef}>
+        <ScrollableList />
+        <SidebarBottomBar>
+          <SidebarBottomBarIconButton onClick={handleAddAssistantClick} title={t('chat.add.assistant.title')}>
+            <SmilePlus size={20} />
+          </SidebarBottomBarIconButton>
+          <SidebarBottomBarIconButton onClick={handleAddFolderClick} title={t('folders.add_assistant_folder')}>
+            <FolderPlus size={20} />
+          </SidebarBottomBarIconButton>
+        </SidebarBottomBar>
+      </Container>
+    )
+  }
+
   return (
     <Container className="assistants-tab" ref={containerRef}>
-      <UnifiedAddButton
-        onCreateAssistant={onCreateAssistant}
-        setActiveAssistant={setActiveAssistant}
-        setActiveAgentId={setActiveAgentId}
-      />
+      <ScrollableList>
+        {assistantsTabSortType === 'folders' ? (
+          <AssistantFolderTree
+            activeAssistantId={activeAssistant.id}
+            onAssistantSwitch={setActiveAssistant}
+            onAssistantDelete={onDeleteAssistant}
+            onCreateDefaultAssistant={onCreateDefaultAssistant}
+            addPreset={addAssistantPreset}
+            copyAssistant={copyAssistant}
+            handleSortByChange={handleSortByChange}
+            sortByPinyinAsc={sortByPinyinAsc}
+            sortByPinyinDesc={sortByPinyinDesc}
+          />
+        ) : assistantsTabSortType === 'tags' ? (
+          <UnifiedTagGroups
+            groupedItems={groupedUnifiedItems}
+            activeAssistantId={activeAssistant.id}
+            activeAgentId={activeAgentId}
+            sortBy={assistantsTabSortType}
+            collapsedTags={collapsedTags}
+            onGroupReorder={handleUnifiedGroupReorder}
+            onDragStart={() => setDragging(true)}
+            onDragEnd={() => setDragging(false)}
+            onToggleTagCollapse={toggleTagCollapse}
+            onAssistantSwitch={setActiveAssistant}
+            onAssistantDelete={onDeleteAssistant}
+            onAgentDelete={deleteAgent}
+            onAgentPress={handleAgentPress}
+            addPreset={addAssistantPreset}
+            copyAssistant={copyAssistant}
+            onCreateDefaultAssistant={onCreateDefaultAssistant}
+            handleSortByChange={handleSortByChange}
+            sortByPinyinAsc={sortByPinyinAsc}
+            sortByPinyinDesc={sortByPinyinDesc}
+          />
+        ) : (
+          <UnifiedList
+            items={unifiedItems}
+            activeAssistantId={activeAssistant.id}
+            activeAgentId={activeAgentId}
+            sortBy={assistantsTabSortType}
+            onReorder={handleUnifiedListReorder}
+            onDragStart={() => setDragging(true)}
+            onDragEnd={() => setDragging(false)}
+            onAssistantSwitch={setActiveAssistant}
+            onAssistantDelete={onDeleteAssistant}
+            onAgentDelete={deleteAgent}
+            onAgentPress={handleAgentPress}
+            addPreset={addAssistantPreset}
+            copyAssistant={copyAssistant}
+            onCreateDefaultAssistant={onCreateDefaultAssistant}
+            handleSortByChange={handleSortByChange}
+            sortByPinyinAsc={sortByPinyinAsc}
+            sortByPinyinDesc={sortByPinyinDesc}
+          />
+        )}
 
-      {assistantsTabSortType === 'tags' ? (
-        <UnifiedTagGroups
-          groupedItems={groupedUnifiedItems}
-          activeAssistantId={activeAssistant.id}
-          activeAgentId={activeAgentId}
-          sortBy={assistantsTabSortType}
-          collapsedTags={collapsedTags}
-          onGroupReorder={handleUnifiedGroupReorder}
-          onDragStart={() => setDragging(true)}
-          onDragEnd={() => setDragging(false)}
-          onToggleTagCollapse={toggleTagCollapse}
-          onAssistantSwitch={setActiveAssistant}
-          onAssistantDelete={onDeleteAssistant}
-          onAgentDelete={deleteAgent}
-          onAgentPress={handleAgentPress}
-          addPreset={addAssistantPreset}
-          copyAssistant={copyAssistant}
-          onCreateDefaultAssistant={onCreateDefaultAssistant}
-          handleSortByChange={handleSortByChange}
-          sortByPinyinAsc={sortByPinyinAsc}
-          sortByPinyinDesc={sortByPinyinDesc}
-        />
-      ) : (
-        <UnifiedList
-          items={unifiedItems}
-          activeAssistantId={activeAssistant.id}
-          activeAgentId={activeAgentId}
-          sortBy={assistantsTabSortType}
-          onReorder={handleUnifiedListReorder}
-          onDragStart={() => setDragging(true)}
-          onDragEnd={() => setDragging(false)}
-          onAssistantSwitch={setActiveAssistant}
-          onAssistantDelete={onDeleteAssistant}
-          onAgentDelete={deleteAgent}
-          onAgentPress={handleAgentPress}
-          addPreset={addAssistantPreset}
-          copyAssistant={copyAssistant}
-          onCreateDefaultAssistant={onCreateDefaultAssistant}
-          handleSortByChange={handleSortByChange}
-          sortByPinyinAsc={sortByPinyinAsc}
-          sortByPinyinDesc={sortByPinyinDesc}
-        />
-      )}
+        {!dragging && <div style={{ minHeight: 10 }} />}
+      </ScrollableList>
 
-      {!dragging && <div style={{ minHeight: 10 }}></div>}
+      <SidebarBottomBar>
+        <SidebarBottomBarIconButton onClick={handleAddAssistantClick} title={t('chat.add.assistant.title')}>
+          <SmilePlus size={20} />
+        </SidebarBottomBarIconButton>
+        <SidebarBottomBarIconButton onClick={handleAddFolderClick} title={t('folders.add_assistant_folder')}>
+          <FolderPlus size={20} />
+        </SidebarBottomBarIconButton>
+      </SidebarBottomBar>
     </Container>
   )
 }
 
-const Container = styled(Scrollbar)`
+const Container = styled.div`
   display: flex;
   flex-direction: column;
-  padding: 12px 10px;
+  height: 100%;
+  padding: 12px 10px 0;
+`
+
+const ScrollableList = styled(Scrollbar)`
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 8px;
 `
 
 export default AssistantsTab

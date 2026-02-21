@@ -1532,6 +1532,18 @@
     },
     "user": "User"
   },
+  "folders": {
+    "add_assistant_folder": "Add folder",
+    "add_subfolder": "Add subfolder",
+    "add_topic_folder": "Add folder",
+    "delete_folder_content": "Topics in this folder will move to Uncategorized. Continue?",
+    "delete_folder_title": "Delete folder?",
+    "move_to_folder": "Move to folder",
+    "new_folder_name": "New folder",
+    "rename_folder": "Rename folder",
+    "show_by_folders": "Folder View",
+    "uncategorized": "Uncategorized"
+  },
   "files": {
     "actions": "Actions",
     "all": "All Files",

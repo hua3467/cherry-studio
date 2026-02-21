@@ -20,6 +20,7 @@ import type { BaseTool, MCPTool } from './tool'
 export * from './agent'
 export * from './apiModels'
 export * from './apiServer'
+export * from './folders'
 export * from './knowledge'
 export * from './mcp'
 export * from './notification'
@@ -80,7 +81,7 @@ export const isTranslateAssistant = (assistant: Assistant): assistant is Transla
   return (assistant.model && assistant.targetLanguage && typeof assistant.content === 'string') !== undefined
 }
 
-export type AssistantsSortType = 'tags' | 'list'
+export type AssistantsSortType = 'tags' | 'list' | 'folders'
 
 export type AssistantMessage = {
   role: 'user' | 'assistant'

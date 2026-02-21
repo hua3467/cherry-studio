@@ -1,3 +1,4 @@
+import { DownOutlined, RightOutlined } from '@ant-design/icons'
 import AssistantAvatar from '@renderer/components/Avatar/AssistantAvatar'
 import type { DraggableVirtualListRef } from '@renderer/components/DraggableList'
 import { DraggableVirtualList } from '@renderer/components/DraggableList'
@@ -5,9 +6,11 @@ import { CopyIcon, DeleteIcon, EditIcon } from '@renderer/components/Icons'
 import ObsidianExportPopup from '@renderer/components/Popups/ObsidianExportPopup'
 import PromptPopup from '@renderer/components/Popups/PromptPopup'
 import SaveToKnowledgePopup from '@renderer/components/Popups/SaveToKnowledgePopup'
+import Scrollbar from '@renderer/components/Scrollbar'
 import { isMac } from '@renderer/config/constant'
 import { db } from '@renderer/databases'
 import { useAssistant, useAssistants } from '@renderer/hooks/useAssistant'
+import { useFolders } from '@renderer/hooks/useFolders'
 import { useInPlaceEdit } from '@renderer/hooks/useInPlaceEdit'
 import { useNotesSettings } from '@renderer/hooks/useNotesSettings'
 import { modelGenerating } from '@renderer/hooks/useRuntime'
@@ -41,16 +44,20 @@ import {
   BrushCleaning,
   CheckSquare,
   FolderOpen,
+  FolderPlus,
   HelpCircle,
   ListChecks,
   MenuIcon,
+  MoreVertical,
   NotebookPen,
   PackagePlus,
+  Pencil,
   PinIcon,
   PinOffIcon,
   Save,
   Sparkles,
   Square,
+  Trash2,
   UploadIcon,
   XIcon
 } from 'lucide-react'
@@ -59,7 +66,8 @@ import { useTranslation } from 'react-i18next'
 import { useDispatch, useSelector } from 'react-redux'
 import styled from 'styled-components'
 
-import AddButton from './AddButton'
+import { SidebarBottomBar, SidebarBottomBarIconButton } from './SidebarBottomBar'
+import { TagGroup } from './TagGroup'
 import { TopicManagePanel, useTopicManageMode } from './TopicManageMode'
 
 interface Props {
@@ -75,6 +83,17 @@ export const Topics: React.FC<Props> = ({ assistant: _assistant, activeTopic, se
   const { assistants } = useAssistants()
   const { assistant, addTopic, removeTopic, moveTopic, updateTopic, updateTopics } = useAssistant(_assistant.id)
   const { showTopicTime, pinTopicsToTop, setTopicPosition, topicPosition } = useSettings()
+  const {
+    topicFolders,
+    topicToFolder,
+    topicFolderOrderByAssistant,
+    collapsedTopicFolders,
+    addTopicFolder,
+    setTopicFolder,
+    removeTopicFolder,
+    updateTopicFolder,
+    toggleTopicFolderCollapse
+  } = useFolders()
 
   const renamingTopics = useSelector((state: RootState) => state.runtime.chat.renamingTopics)
   const topicLoadingQuery = useSelector((state: RootState) => state.messages.loadingByTopic)
@@ -474,6 +493,27 @@ export const Topics: React.FC<Props> = ({ assistant: _assistant, activeTopic, se
       }
     ]
 
+    const assistantTopicFolders = topicFolders.filter((f) => f.assistantId === assistant.id)
+    if (assistantTopicFolders.length > 0) {
+      menus.push({
+        label: t('folders.move_to_folder'),
+        key: 'move-to-folder',
+        icon: <FolderOpen size={14} />,
+        children: [
+          {
+            label: t('folders.uncategorized'),
+            key: 'folder-uncategorized',
+            onClick: () => setTopicFolder(topic.id, '')
+          },
+          ...assistantTopicFolders.map((f) => ({
+            label: f.name,
+            key: f.id,
+            onClick: () => setTopicFolder(topic.id, f.id)
+          }))
+        ]
+      })
+    }
+
     if (assistants.length > 1 && assistant.topics.length > 1) {
       menus.push({
         label: t('chat.topics.move_to'),
@@ -525,7 +565,9 @@ export const Topics: React.FC<Props> = ({ assistant: _assistant, activeTopic, se
     onClearMessages,
     setTopicPosition,
     onMoveTopic,
-    onDeleteTopic
+    onDeleteTopic,
+    topicFolders,
+    setTopicFolder
   ])
 
   // Sort topics based on pinned status if pinTopicsToTop is enabled
@@ -562,153 +604,545 @@ export const Topics: React.FC<Props> = ({ assistant: _assistant, activeTopic, se
     })
   }, [sortedTopics, deferredSearchText, isManageMode])
 
+  // Build topic groups as tree for folder view: Uncategorized + folders with optional subGroups
+  type TopicGroup = { id: string; label: string; topics: Topic[]; isFolder: boolean; subGroups: TopicGroup[] }
+  const topicGroups = useMemo(() => {
+    const assistantFolderIds = topicFolderOrderByAssistant[assistant.id] ?? []
+    const byFolder = new Map<string, Topic[]>()
+    byFolder.set('', [])
+    assistantFolderIds.forEach((fid) => byFolder.set(fid, []))
+    filteredTopics.forEach((topic) => {
+      const fid = topicToFolder[topic.id] ?? ''
+      if (!byFolder.has(fid)) byFolder.set(fid, [])
+      byFolder.get(fid)!.push(topic)
+    })
+    const findGroup = (arr: TopicGroup[], id: string): TopicGroup | null => {
+      for (const g of arr) {
+        if (g.id === id) return g
+        const found = findGroup(g.subGroups, id)
+        if (found) return found
+      }
+      return null
+    }
+    const result: TopicGroup[] = [
+      { id: '', label: t('folders.uncategorized'), topics: byFolder.get('') ?? [], isFolder: false, subGroups: [] }
+    ]
+    assistantFolderIds.forEach((fid) => {
+      const folder = topicFolders.find((f) => f.id === fid)
+      if (!folder) return
+      const group: TopicGroup = {
+        id: fid,
+        label: folder.name,
+        topics: byFolder.get(fid) ?? [],
+        isFolder: true,
+        subGroups: []
+      }
+      if (!folder.parentId) {
+        result.push(group)
+      } else {
+        const parent = findGroup(result, folder.parentId)
+        if (parent) parent.subGroups.push(group)
+      }
+    })
+    return result
+  }, [assistant.id, filteredTopics, topicToFolder, topicFolderOrderByAssistant, topicFolders, t])
+
+  const hasTopicFolderView = topicGroups.length > 1
+
   const singlealone = topicPosition === 'right' && position === 'right'
+
+  const renderTopicRow = useCallback(
+    (topic: Topic) => {
+      const isActive = topic.id === activeTopic?.id
+      const topicName = topic.name.replace('`', '')
+      const topicPrompt = topic.prompt
+      const fullTopicPrompt = t('common.prompt') + ': ' + topicPrompt
+      const isSelected = selectedIds.has(topic.id)
+      const canSelect = !topic.pinned
+      const getTopicNameClassName = () => {
+        if (isRenaming(topic.id)) return 'shimmer'
+        if (isNewlyRenamed(topic.id)) return 'typing'
+        return ''
+      }
+      const handleItemClick = () => {
+        if (isManageMode) {
+          if (canSelect) toggleSelectTopic(topic.id)
+        } else {
+          onSwitchTopic(topic)
+        }
+      }
+      return (
+        <Dropdown menu={{ items: getTopicMenuItems }} trigger={['contextMenu']} disabled={isManageMode}>
+          <TopicListItem
+            onContextMenu={() => setTargetTopic(topic)}
+            className={classNames(
+              isActive && !isManageMode ? 'active' : '',
+              singlealone ? 'singlealone' : '',
+              isManageMode && isSelected ? 'selected' : '',
+              isManageMode && !canSelect ? 'disabled' : ''
+            )}
+            onClick={editingTopicId === topic.id && isEditing ? undefined : handleItemClick}
+            style={{
+              borderRadius,
+              cursor:
+                editingTopicId === topic.id && isEditing
+                  ? 'default'
+                  : isManageMode && !canSelect
+                    ? 'not-allowed'
+                    : 'pointer'
+            }}>
+            {isPending(topic.id) && !isActive && <PendingIndicator />}
+            {isFulfilled(topic.id) && !isActive && <FulfilledIndicator />}
+            <TopicNameContainer>
+              {isManageMode && (
+                <SelectIcon className={!canSelect ? 'disabled' : ''}>
+                  {isSelected ? (
+                    <CheckSquare size={16} color="var(--color-primary)" />
+                  ) : (
+                    <Square size={16} color="var(--color-text-3)" />
+                  )}
+                </SelectIcon>
+              )}
+              {editingTopicId === topic.id && isEditing ? (
+                <TopicEditInput {...inputProps} onClick={(e) => e.stopPropagation()} />
+              ) : (
+                <TopicName
+                  className={getTopicNameClassName()}
+                  title={topicName}
+                  onDoubleClick={
+                    isManageMode
+                      ? undefined
+                      : () => {
+                          setEditingTopicId(topic.id)
+                          startEdit(topic.name)
+                        }
+                  }>
+                  {topicName}
+                </TopicName>
+              )}
+              {!topic.pinned && (
+                <Tooltip
+                  placement="bottom"
+                  mouseEnterDelay={0.7}
+                  mouseLeaveDelay={0}
+                  title={
+                    <div style={{ fontSize: '12px', opacity: 0.8, fontStyle: 'italic' }}>
+                      {t('chat.topics.delete.shortcut', { key: isMac ? '⌘' : 'Ctrl' })}
+                    </div>
+                  }>
+                  <MenuButton
+                    className="menu"
+                    onClick={(e) => {
+                      if (e.ctrlKey || e.metaKey) {
+                        handleConfirmDelete(topic, e)
+                      } else if (deletingTopicId === topic.id) {
+                        handleConfirmDelete(topic, e)
+                      } else {
+                        handleDeleteClick(topic.id, e)
+                      }
+                    }}>
+                    {deletingTopicId === topic.id ? (
+                      <DeleteIcon size={14} color="var(--color-error)" style={{ pointerEvents: 'none' }} />
+                    ) : (
+                      <XIcon size={14} color="var(--color-text-3)" style={{ pointerEvents: 'none' }} />
+                    )}
+                  </MenuButton>
+                </Tooltip>
+              )}
+              {topic.pinned && (
+                <MenuButton className="pin">
+                  <PinIcon size={14} color="var(--color-text-3)" />
+                </MenuButton>
+              )}
+            </TopicNameContainer>
+            {topicPrompt && (
+              <TopicPromptText className="prompt" title={fullTopicPrompt}>
+                {fullTopicPrompt}
+              </TopicPromptText>
+            )}
+            {showTopicTime && (
+              <TopicTime className="time">{dayjs(topic.createdAt).format('YYYY/MM/DD HH:mm')}</TopicTime>
+            )}
+          </TopicListItem>
+        </Dropdown>
+      )
+    },
+    [
+      activeTopic?.id,
+      borderRadius,
+      editingTopicId,
+      getTopicMenuItems,
+      isEditing,
+      isManageMode,
+      isPending,
+      isFulfilled,
+      isRenaming,
+      isNewlyRenamed,
+      selectedIds,
+      singlealone,
+      inputProps,
+      handleConfirmDelete,
+      handleDeleteClick,
+      deletingTopicId,
+      onSwitchTopic,
+      setTargetTopic,
+      setEditingTopicId,
+      startEdit,
+      toggleSelectTopic,
+      showTopicTime,
+      t
+    ]
+  )
+
+  const handleAddTopicFolderClick = useCallback(async () => {
+    const name = await PromptPopup.show({
+      title: t('folders.add_topic_folder'),
+      message: '',
+      defaultValue: t('folders.new_folder_name')
+    })
+    if (name?.trim()) addTopicFolder(assistant.id, name.trim())
+  }, [addTopicFolder, assistant.id, t])
+
+  const headerContent = (
+    <HeaderRow>
+      <Tooltip title={t('chat.topics.manage.title')} mouseEnterDelay={0.5}>
+        <HeaderIconButton
+          onClick={isManageMode ? exitManageMode : enterManageMode}
+          className={isManageMode ? 'active' : ''}>
+          <ListChecks size={14} />
+        </HeaderIconButton>
+      </Tooltip>
+    </HeaderRow>
+  )
 
   return (
     <>
-      <DraggableVirtualList
-        ref={listRef}
-        className="topics-tab"
-        list={filteredTopics}
-        onUpdate={updateTopics}
-        style={{ height: '100%', padding: '8px 0 10px 10px', paddingBottom: isManageMode ? 70 : 10 }}
-        itemContainerStyle={{ paddingBottom: '8px' }}
-        header={
-          <HeaderRow>
-            <AddButton onClick={() => EventEmitter.emit(EVENT_NAMES.ADD_NEW_TOPIC)}>
-              {t('chat.add.topic.title')}
-            </AddButton>
-            <Tooltip title={t('chat.topics.manage.title')} mouseEnterDelay={0.5}>
-              <HeaderIconButton
-                onClick={isManageMode ? exitManageMode : enterManageMode}
-                className={isManageMode ? 'active' : ''}>
-                <ListChecks size={14} />
-              </HeaderIconButton>
-            </Tooltip>
-          </HeaderRow>
-        }
-        disabled={isManageMode}>
-        {(topic) => {
-          const isActive = topic.id === activeTopic?.id
-          const topicName = topic.name.replace('`', '')
-          const topicPrompt = topic.prompt
-          const fullTopicPrompt = t('common.prompt') + ': ' + topicPrompt
-          const isSelected = selectedIds.has(topic.id)
-          const canSelect = !topic.pinned
-
-          const getTopicNameClassName = () => {
-            if (isRenaming(topic.id)) return 'shimmer'
-            if (isNewlyRenamed(topic.id)) return 'typing'
-            return ''
-          }
-
-          const handleItemClick = () => {
-            if (isManageMode) {
-              if (canSelect) {
-                toggleSelectTopic(topic.id)
-              }
-            } else {
-              onSwitchTopic(topic)
-            }
-          }
-
-          return (
-            <Dropdown menu={{ items: getTopicMenuItems }} trigger={['contextMenu']} disabled={isManageMode}>
-              <TopicListItem
-                onContextMenu={() => setTargetTopic(topic)}
-                className={classNames(
-                  isActive && !isManageMode ? 'active' : '',
-                  singlealone ? 'singlealone' : '',
-                  isManageMode && isSelected ? 'selected' : '',
-                  isManageMode && !canSelect ? 'disabled' : ''
-                )}
-                onClick={editingTopicId === topic.id && isEditing ? undefined : handleItemClick}
-                style={{
-                  borderRadius,
-                  cursor:
-                    editingTopicId === topic.id && isEditing
-                      ? 'default'
-                      : isManageMode && !canSelect
-                        ? 'not-allowed'
-                        : 'pointer'
-                }}>
-                {isPending(topic.id) && !isActive && <PendingIndicator />}
-                {isFulfilled(topic.id) && !isActive && <FulfilledIndicator />}
-                <TopicNameContainer>
-                  {isManageMode && (
-                    <SelectIcon className={!canSelect ? 'disabled' : ''}>
-                      {isSelected ? (
-                        <CheckSquare size={16} color="var(--color-primary)" />
-                      ) : (
-                        <Square size={16} color="var(--color-text-3)" />
-                      )}
-                    </SelectIcon>
-                  )}
-                  {editingTopicId === topic.id && isEditing ? (
-                    <TopicEditInput {...inputProps} onClick={(e) => e.stopPropagation()} />
-                  ) : (
-                    <TopicName
-                      className={getTopicNameClassName()}
-                      title={topicName}
-                      onDoubleClick={
-                        isManageMode
-                          ? undefined
-                          : () => {
-                              setEditingTopicId(topic.id)
-                              startEdit(topic.name)
-                            }
-                      }>
-                      {topicName}
-                    </TopicName>
-                  )}
-                  {!topic.pinned && (
-                    <Tooltip
-                      placement="bottom"
-                      mouseEnterDelay={0.7}
-                      mouseLeaveDelay={0}
-                      title={
-                        <div style={{ fontSize: '12px', opacity: 0.8, fontStyle: 'italic' }}>
-                          {t('chat.topics.delete.shortcut', { key: isMac ? '⌘' : 'Ctrl' })}
+      {hasTopicFolderView ? (
+        <div
+          className="topics-tab"
+          style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '8px 0 0 10px' }}>
+          {headerContent}
+          <Scrollbar style={{ flex: 1, minHeight: 0 }}>
+            <div style={{ paddingBottom: isManageMode ? 70 : 10 }}>
+              {topicGroups.map((group) => {
+                const isCollapsed = group.isFolder ? collapsedTopicFolders[group.id] : false
+                const onToggle = group.isFolder ? () => toggleTopicFolderCollapse(group.id) : () => {}
+                const showTitle = group.isFolder || group.topics.length > 0
+                if (group.isFolder) {
+                  return (
+                    <div key={group.id} style={{ marginBottom: 8 }}>
+                      <div className="my-1 flex h-6 cursor-pointer flex-row items-center justify-between text-[var(--color-text-2)] text-xs">
+                        <div
+                          className="mr-1 flex max-w-[85%] flex-1 items-center truncate"
+                          onClick={onToggle}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === 'Enter' && onToggle()}>
+                          {isCollapsed ? (
+                            <RightOutlined style={{ fontSize: '10px', marginRight: '5px' }} />
+                          ) : (
+                            <DownOutlined style={{ fontSize: '10px', marginRight: '5px' }} />
+                          )}
+                          <Tooltip title={group.label}>
+                            <span className="truncate px-1 text-[13px] text-[var(--color-text)]">{group.label}</span>
+                          </Tooltip>
                         </div>
-                      }>
-                      <MenuButton
-                        className="menu"
-                        onClick={(e) => {
-                          if (e.ctrlKey || e.metaKey) {
-                            handleConfirmDelete(topic, e)
-                          } else if (deletingTopicId === topic.id) {
-                            handleConfirmDelete(topic, e)
-                          } else {
-                            handleDeleteClick(topic.id, e)
-                          }
-                        }}>
-                        {deletingTopicId === topic.id ? (
-                          <DeleteIcon size={14} color="var(--color-error)" style={{ pointerEvents: 'none' }} />
-                        ) : (
-                          <XIcon size={14} color="var(--color-text-3)" style={{ pointerEvents: 'none' }} />
-                        )}
-                      </MenuButton>
-                    </Tooltip>
-                  )}
-                  {topic.pinned && (
-                    <MenuButton className="pin">
-                      <PinIcon size={14} color="var(--color-text-3)" />
-                    </MenuButton>
-                  )}
-                </TopicNameContainer>
-                {topicPrompt && (
-                  <TopicPromptText className="prompt" title={fullTopicPrompt}>
-                    {fullTopicPrompt}
-                  </TopicPromptText>
-                )}
-                {showTopicTime && (
-                  <TopicTime className="time">{dayjs(topic.createdAt).format('YYYY/MM/DD HH:mm')}</TopicTime>
-                )}
-              </TopicListItem>
-            </Dropdown>
-          )
-        }}
-      </DraggableVirtualList>
+                        <Dropdown
+                          menu={{
+                            items: [
+                              {
+                                key: 'add-subfolder',
+                                icon: <FolderPlus size={14} />,
+                                label: t('folders.add_subfolder'),
+                                onClick: () => {
+                                  PromptPopup.show({
+                                    title: t('folders.add_subfolder'),
+                                    message: '',
+                                    defaultValue: t('folders.new_folder_name')
+                                  }).then((name) => name?.trim() && addTopicFolder(assistant.id, name.trim(), group.id))
+                                }
+                              },
+                              {
+                                key: 'rename',
+                                icon: <Pencil size={14} />,
+                                label: t('folders.rename_folder'),
+                                onClick: () => {
+                                  PromptPopup.show({
+                                    title: t('folders.rename_folder'),
+                                    message: '',
+                                    defaultValue: group.label
+                                  }).then((name) => name?.trim() && updateTopicFolder(group.id, name.trim()))
+                                }
+                              },
+                              {
+                                key: 'delete',
+                                icon: <Trash2 size={14} />,
+                                label: t('common.delete'),
+                                danger: true,
+                                onClick: () => {
+                                  window.modal.confirm({
+                                    title: t('folders.delete_folder_title'),
+                                    content: t('folders.delete_folder_content'),
+                                    centered: true,
+                                    okButtonProps: { danger: true },
+                                    onOk: () => removeTopicFolder(group.id, assistant.id)
+                                  })
+                                }
+                              }
+                            ]
+                          }}
+                          trigger={['click']}>
+                          <span
+                            className="cursor-pointer p-1 hover:rounded hover:bg-[var(--color-fill-2)]"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                            role="button"
+                            tabIndex={0}>
+                            <MoreVertical size={12} className="text-[var(--color-text-3)]" />
+                          </span>
+                        </Dropdown>
+                      </div>
+                      {!isCollapsed && (
+                        <>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {group.topics.map((topic) => (
+                              <div key={topic.id} style={{ paddingBottom: 8 }}>
+                                {renderTopicRow(topic)}
+                              </div>
+                            ))}
+                          </div>
+                          {group.subGroups.map((sub) => (
+                            <div key={sub.id} style={{ marginLeft: 12, marginTop: 8 }}>
+                              <div className="my-1 flex h-6 cursor-pointer flex-row items-center justify-between text-[var(--color-text-2)] text-xs">
+                                <div
+                                  className="mr-1 flex max-w-[85%] flex-1 items-center truncate"
+                                  onClick={() => toggleTopicFolderCollapse(sub.id)}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(e) => e.key === 'Enter' && toggleTopicFolderCollapse(sub.id)}>
+                                  {collapsedTopicFolders[sub.id] ? (
+                                    <RightOutlined style={{ fontSize: '10px', marginRight: '5px' }} />
+                                  ) : (
+                                    <DownOutlined style={{ fontSize: '10px', marginRight: '5px' }} />
+                                  )}
+                                  <Tooltip title={sub.label}>
+                                    <span className="truncate px-1 text-[13px] text-[var(--color-text)]">
+                                      {sub.label}
+                                    </span>
+                                  </Tooltip>
+                                </div>
+                                <Dropdown
+                                  menu={{
+                                    items: [
+                                      {
+                                        key: 'add-subfolder',
+                                        icon: <FolderPlus size={14} />,
+                                        label: t('folders.add_subfolder'),
+                                        onClick: () => {
+                                          PromptPopup.show({
+                                            title: t('folders.add_subfolder'),
+                                            message: '',
+                                            defaultValue: t('folders.new_folder_name')
+                                          }).then(
+                                            (name) => name?.trim() && addTopicFolder(assistant.id, name.trim(), sub.id)
+                                          )
+                                        }
+                                      },
+                                      {
+                                        key: 'rename',
+                                        icon: <Pencil size={14} />,
+                                        label: t('folders.rename_folder'),
+                                        onClick: () => {
+                                          PromptPopup.show({
+                                            title: t('folders.rename_folder'),
+                                            message: '',
+                                            defaultValue: sub.label
+                                          }).then((name) => name?.trim() && updateTopicFolder(sub.id, name.trim()))
+                                        }
+                                      },
+                                      {
+                                        key: 'delete',
+                                        icon: <Trash2 size={14} />,
+                                        label: t('common.delete'),
+                                        danger: true,
+                                        onClick: () => {
+                                          window.modal.confirm({
+                                            title: t('folders.delete_folder_title'),
+                                            content: t('folders.delete_folder_content'),
+                                            centered: true,
+                                            okButtonProps: { danger: true },
+                                            onOk: () => removeTopicFolder(sub.id, assistant.id)
+                                          })
+                                        }
+                                      }
+                                    ]
+                                  }}
+                                  trigger={['click']}>
+                                  <span
+                                    className="cursor-pointer p-1 hover:rounded hover:bg-[var(--color-fill-2)]"
+                                    onClick={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                                    role="button"
+                                    tabIndex={0}>
+                                    <MoreVertical size={12} className="text-[var(--color-text-3)]" />
+                                  </span>
+                                </Dropdown>
+                              </div>
+                              {!collapsedTopicFolders[sub.id] && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  {sub.topics.map((topic) => (
+                                    <div key={topic.id} style={{ paddingBottom: 8 }}>
+                                      {renderTopicRow(topic)}
+                                    </div>
+                                  ))}
+                                  {sub.subGroups.length > 0 &&
+                                    sub.subGroups.map((subSub) => (
+                                      <div key={subSub.id} style={{ marginLeft: 12, marginTop: 8 }}>
+                                        <div className="my-1 flex h-6 cursor-pointer flex-row items-center justify-between text-[var(--color-text-2)] text-xs">
+                                          <div
+                                            className="mr-1 flex max-w-[85%] flex-1 items-center truncate"
+                                            onClick={() => toggleTopicFolderCollapse(subSub.id)}
+                                            role="button"
+                                            tabIndex={0}>
+                                            {collapsedTopicFolders[subSub.id] ? (
+                                              <RightOutlined style={{ fontSize: '10px', marginRight: '5px' }} />
+                                            ) : (
+                                              <DownOutlined style={{ fontSize: '10px', marginRight: '5px' }} />
+                                            )}
+                                            <span className="truncate px-1 text-[13px] text-[var(--color-text)]">
+                                              {subSub.label}
+                                            </span>
+                                          </div>
+                                          <Dropdown
+                                            menu={{
+                                              items: [
+                                                {
+                                                  key: 'add-subfolder',
+                                                  icon: <FolderPlus size={14} />,
+                                                  label: t('folders.add_subfolder'),
+                                                  onClick: () => {
+                                                    PromptPopup.show({
+                                                      title: t('folders.add_subfolder'),
+                                                      message: '',
+                                                      defaultValue: t('folders.new_folder_name')
+                                                    }).then(
+                                                      (name) =>
+                                                        name?.trim() &&
+                                                        addTopicFolder(assistant.id, name.trim(), subSub.id)
+                                                    )
+                                                  }
+                                                },
+                                                {
+                                                  key: 'rename',
+                                                  icon: <Pencil size={14} />,
+                                                  label: t('folders.rename_folder'),
+                                                  onClick: () => {
+                                                    PromptPopup.show({
+                                                      title: t('folders.rename_folder'),
+                                                      message: '',
+                                                      defaultValue: subSub.label
+                                                    }).then(
+                                                      (name) =>
+                                                        name?.trim() && updateTopicFolder(subSub.id, name.trim())
+                                                    )
+                                                  }
+                                                },
+                                                {
+                                                  key: 'delete',
+                                                  icon: <Trash2 size={14} />,
+                                                  label: t('common.delete'),
+                                                  danger: true,
+                                                  onClick: () => {
+                                                    window.modal.confirm({
+                                                      title: t('folders.delete_folder_title'),
+                                                      content: t('folders.delete_folder_content'),
+                                                      centered: true,
+                                                      okButtonProps: { danger: true },
+                                                      onOk: () => removeTopicFolder(subSub.id, assistant.id)
+                                                    })
+                                                  }
+                                                }
+                                              ]
+                                            }}
+                                            trigger={['click']}>
+                                            <span
+                                              className="cursor-pointer p-1 hover:rounded hover:bg-[var(--color-fill-2)]"
+                                              onClick={(e) => e.stopPropagation()}
+                                              onKeyDown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                                              role="button"
+                                              tabIndex={0}>
+                                              <MoreVertical size={12} className="text-[var(--color-text-3)]" />
+                                            </span>
+                                          </Dropdown>
+                                        </div>
+                                        {!collapsedTopicFolders[subSub.id] && (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                            {subSub.topics.map((topic) => (
+                                              <div key={topic.id} style={{ paddingBottom: 8 }}>
+                                                {renderTopicRow(topic)}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )
+                }
+                const uncategorizedCollapsed = collapsedTopicFolders['']
+                return (
+                  <TagGroup
+                    key="uncategorized"
+                    tag={group.label}
+                    isCollapsed={uncategorizedCollapsed}
+                    onToggle={() => toggleTopicFolderCollapse('')}
+                    showTitle={showTitle}>
+                    {!uncategorizedCollapsed && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {group.topics.map((topic) => (
+                          <div key={topic.id} style={{ paddingBottom: 8 }}>
+                            {renderTopicRow(topic)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TagGroup>
+                )
+              })}
+            </div>
+          </Scrollbar>
+          <SidebarBottomBar>
+            <SidebarBottomBarIconButton onClick={handleAddTopicFolderClick} title={t('folders.add_topic_folder')}>
+              <FolderPlus size={20} />
+            </SidebarBottomBarIconButton>
+          </SidebarBottomBar>
+        </div>
+      ) : (
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '8px 0 0 10px' }}>
+          <DraggableVirtualList
+            ref={listRef}
+            className="topics-tab"
+            list={filteredTopics}
+            onUpdate={updateTopics}
+            style={{ flex: 1, minHeight: 0, padding: '0 0 10px 0', paddingBottom: isManageMode ? 70 : 10 }}
+            itemContainerStyle={{ paddingBottom: '8px' }}
+            header={headerContent}
+            disabled={isManageMode}>
+            {(topic) => renderTopicRow(topic)}
+          </DraggableVirtualList>
+          <SidebarBottomBar>
+            <SidebarBottomBarIconButton onClick={handleAddTopicFolderClick} title={t('folders.add_topic_folder')}>
+              <FolderPlus size={20} />
+            </SidebarBottomBarIconButton>
+          </SidebarBottomBar>
+        </div>
+      )}
 
       {/* 管理模式底部面板 */}
       <TopicManagePanel

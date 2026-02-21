@@ -3244,6 +3244,10 @@ const migrateConfig = {
       logger.error('migrate 198 error', error as Error)
       return state
     }
+  },
+  '199': (state: RootState) => {
+    // Folders feature: new slice is added; rehydration will use reducer initialState if missing
+    return state
   }
 }
 

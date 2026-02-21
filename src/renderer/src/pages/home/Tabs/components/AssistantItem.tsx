@@ -20,6 +20,7 @@ import {
   ArrowUpAZ,
   BrushCleaning,
   Check,
+  FolderOpen,
   MoreVertical,
   Plus,
   Save,
@@ -48,6 +49,9 @@ interface AssistantItemProps {
   handleSortByChange?: (sortType: AssistantsSortType) => void
   sortByPinyinAsc?: () => void
   sortByPinyinDesc?: () => void
+  /** When in folders view: options for "Move to folder" submenu */
+  folderOptions?: { folderId: string; label: string }[]
+  onMoveToFolder?: (assistantId: string, folderId: string) => void
 }
 
 const AssistantItem: FC<AssistantItemProps> = ({
@@ -60,7 +64,9 @@ const AssistantItem: FC<AssistantItemProps> = ({
   copyAssistant,
   handleSortByChange,
   sortByPinyinAsc: externalSortByPinyinAsc,
-  sortByPinyinDesc: externalSortByPinyinDesc
+  sortByPinyinDesc: externalSortByPinyinDesc,
+  folderOptions,
+  onMoveToFolder
 }) => {
   const { t } = useTranslation()
   const { allTags } = useTags()
@@ -112,7 +118,9 @@ const AssistantItem: FC<AssistantItemProps> = ({
         sortBy,
         handleSortByChange,
         sortByPinyinAsc,
-        sortByPinyinDesc
+        sortByPinyinDesc,
+        folderOptions,
+        onMoveToFolder
       }),
     [
       assistant,
@@ -129,7 +137,9 @@ const AssistantItem: FC<AssistantItemProps> = ({
       sortBy,
       handleSortByChange,
       sortByPinyinAsc,
-      sortByPinyinDesc
+      sortByPinyinDesc,
+      folderOptions,
+      onMoveToFolder
     ]
   )
 
@@ -272,12 +282,14 @@ function getMenuItems({
   onDelete,
   removeAllTopics,
   setAssistantIconType,
-  sortBy,
+  sortBy: _sortBy,
   handleSortByChange,
   sortByPinyinAsc,
-  sortByPinyinDesc
+  sortByPinyinDesc,
+  folderOptions,
+  onMoveToFolder
 }): MenuProps['items'] {
-  return [
+  const items: MenuProps['items'] = [
     {
       label: t('assistants.edit.title'),
       key: 'edit',
@@ -353,13 +365,38 @@ function getMenuItems({
       children: createTagMenuItems(allTags, assistant, assistants, updateAssistants, t)
     },
     {
-      label: sortBy === 'list' ? t('assistants.list.showByTags') : t('assistants.list.showByList'),
-      key: 'switch-view',
-      icon: sortBy === 'list' ? <Tags size={14} /> : <AlignJustify size={14} />,
-      onClick: () => {
-        sortBy === 'list' ? handleSortByChange?.('tags') : handleSortByChange?.('list')
-      }
+      label: t('assistants.list.showByList'),
+      key: 'switch-view-list',
+      icon: <AlignJustify size={14} />,
+      onClick: () => handleSortByChange?.('list')
     },
+    {
+      label: t('assistants.list.showByTags'),
+      key: 'switch-view-tags',
+      icon: <Tags size={14} />,
+      onClick: () => handleSortByChange?.('tags')
+    },
+    {
+      label: t('folders.show_by_folders'),
+      key: 'switch-view-folders',
+      icon: <FolderOpen size={14} />,
+      onClick: () => handleSortByChange?.('folders')
+    },
+    ...(folderOptions?.length && onMoveToFolder
+      ? [
+          { type: 'divider' as const },
+          {
+            label: t('folders.move_to_folder'),
+            key: 'move-to-folder',
+            icon: <FolderOpen size={14} />,
+            children: folderOptions.map((opt) => ({
+              key: `folder-${opt.folderId || 'none'}`,
+              label: opt.label,
+              onClick: () => onMoveToFolder(assistant.id, opt.folderId)
+            }))
+          }
+        ]
+      : []),
     {
       label: t('common.sort.pinyin.asc'),
       key: 'sort-asc',
@@ -391,6 +428,7 @@ function getMenuItems({
       }
     }
   ]
+  return items
 }
 
 const Container = ({

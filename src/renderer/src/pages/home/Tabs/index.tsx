@@ -126,7 +126,7 @@ const HomeTabs: FC<Props> = ({
             onCreateDefaultAssistant={onCreateDefaultAssistant}
           />
         )}
-        {tab === 'topic' && (
+        {tab === 'topic' && activeAssistant && (
           <Topics
             assistant={activeAssistant}
             activeTopic={activeTopic}

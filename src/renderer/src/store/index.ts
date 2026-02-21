@@ -26,6 +26,7 @@ import assistants from './assistants'
 import backup from './backup'
 import codeTools from './codeTools'
 import copilot from './copilot'
+import folders from './folders'
 import inputToolsReducer from './inputTools'
 import knowledge from './knowledge'
 import llm from './llm'
@@ -56,6 +57,7 @@ const logger = loggerService.withContext('Store')
 const rootReducer = combineReducers({
   assistants,
   backup,
+  folders,
   codeTools,
   nutstore,
   paintings,
@@ -86,7 +88,7 @@ const persistedReducer = persistReducer(
   {
     key: 'cherry-studio',
     storage,
-    version: 198,
+    version: 199,
     blacklist: ['runtime', 'messages', 'messageBlocks', 'tabs', 'toolPermissions'],
     migrate
   },
@@ -105,7 +107,7 @@ const persistedReducer = persistReducer(
  * Call storeSyncService.subscribe() in the window's entryPoint.tsx
  */
 storeSyncService.setOptions({
-  syncList: ['assistants/', 'settings/', 'llm/', 'selectionStore/', 'note/']
+  syncList: ['assistants/', 'settings/', 'llm/', 'selectionStore/', 'note/', 'folders/']
 })
 
 const store = configureStore({
